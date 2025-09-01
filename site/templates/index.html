@@ -1,32 +1,52 @@
-<!doctype html>
-<html lang="tr">
-<head>
-  <meta charset="utf-8" />
-  <title>Gündem Sivas – Son Haberler</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Gündem Sivas RSS'ten otomatik güncellenen haber akışı.">
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; line-height: 1.6; }
-    h1 { font-size: 28px; margin-bottom: 8px; }
-    p.meta { color: #666; font-size: 14px; margin-top: 0; }
-    ul { list-style: none; padding: 0; }
-    li { margin: 10px 0; }
-    a { text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .date { color: #666; font-size: 14px; }
-    footer { margin-top: 32px; font-size: 14px; color: #666; }
-  </style>
-</head>
-<body>
-  <h1>Gündem Sivas – Son Haberler</h1>
-  <p class="meta">Kaynak: <a href="https://gundemsivas.com/feed" rel="noopener">https://gundemsivas.com/feed</a></p>
+import feedparser
+from datetime import datetime
+from pathlib import Path
+import html
+import os
 
-  <ul>
-    {{NEWS_LIST}}
-  </ul>
+# ========= AYARLAR =========
+RSS_URL = os.getenv("RSS_URL", "https://gundemsivas.com/feed")  # ENV ile de geçilebilir
+MAX_ITEMS = int(os.getenv("MAX_ITEMS", "30"))
+TEMPLATE_PATH = Path("site/templates/index.html")
+OUT_DIR = Path("public/news")
+OUT_FILE = OUT_DIR / "index.html"
+# ===========================
 
-  <footer>
-    Son güncelleme: {{LAST_BUILD}} — Otomatik üretim (GitHub Actions)
-  </footer>
-</body>
-</html>
+def fmt_date(entry):
+    # published veya updated varsa TR formatına çevir
+    for key in ("published_parsed", "updated_parsed"):
+        t = getattr(entry, key, None)
+        if t:
+            return datetime(*t[:6]).strftime("%d.%m.%Y")
+    return ""
+
+def fmt_item(entry):
+    title = html.escape(entry.get("title", "Başlıksız"))
+    link  = html.escape(entry.get("link", "#"))
+    dstr  = fmt_date(entry)
+    date_span = f' <span class="date">— {dstr}</span>' if dstr else ""
+    return f'<li><a href="{link}" rel="noopener">{title}</a>{date_span}</li>'
+
+def main():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    feed = feedparser.parse(RSS_URL)
+    entries = feed.entries[:MAX_ITEMS] if hasattr(feed, "entries") else []
+
+    if not entries:
+        news_html = "<li>Şu an listelenecek içerik bulunamadı.</li>"
+    else:
+        news_html = "\n".join(fmt_item(e) for e in entries)
+
+    html_out = (
+        template
+        .replace("{{NEWS_LIST}}", news_html)
+        .replace("{{LAST_BUILD}}", datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC"))
+    )
+
+    OUT_FILE.write_text(html_out, encoding="utf-8")
+    print(f"Generated: {OUT_FILE}")
+
+if __name__ == "__main__":
+    main()
